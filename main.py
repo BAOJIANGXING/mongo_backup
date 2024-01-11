@@ -26,7 +26,7 @@ if __name__ == "__main__":
                         data = backup_instance.query_databases()
                         for db_name in data:
                             if db_name == 'admin' or db_name == 'config' or db_name == 'local':
-                               continue
+                                continue
                             backup_instance.perform_backup(db_name)
                     else:
                         dbs = config.get(section, 'target_dbs').split(',')
