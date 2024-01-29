@@ -62,35 +62,42 @@ class DatabaseBackup(object):
 
     def perform_backup(self, db_name):
         try:
-            self.logger(f"开始执行备份任务: {db_name}")
-            self.start_time = time.time()
-            self.get_version()
-            self.logger(f"查看当前数据库版本: v{self.version}")
-            if 3 <= self.version < 4.2:
-                self.mongo_dump_path = path.abspath(path.join(path.dirname(__file__), 'bin/4.0.2/mongodump'))
-            elif 4.2 <= self.version <= 7.0:
-                self.mongo_dump_path = path.abspath(path.join(path.dirname(__file__), 'bin/100.9.4/mongodump'))
-            else:
-                raise UnsupportedMongoDBVersionError()
+            if db_name != 'ERROR':
+                self.logger(f"开始执行备份任务: {db_name}")
+                self.start_time = time.time()
+                self.get_version()
+                self.logger(f"查看当前数据库版本: v{self.version}")
+                if 3 <= self.version < 4.2:
+                    self.mongo_dump_path = path.abspath(path.join(path.dirname(__file__), 'bin/4.0.2/mongodump'))
+                elif 4.2 <= self.version <= 7.0:
+                    self.mongo_dump_path = path.abspath(path.join(path.dirname(__file__), 'bin/100.9.4/mongodump'))
+                else:
+                    raise UnsupportedMongoDBVersionError()
 
-            if not (os.path.exists(self.backup_directory)):
-                os.makedirs(self.backup_directory)
-                self.logger("备份目录不存在，创建目录" + self.backup_directory)
-            backup_path = self.backup_directory + "/" + db_name + '_' + time.strftime("%Y%m%d%H%M%S")
-            self.logger(f"正在连接数据库{self.mongo_host}:{self.mongo_port}，开始执行备份{db_name}")
-            command = "%s -h %s:%s -u %s -p %s  --authenticationDatabase admin --gzip -d %s -o %s" % \
-                      (self.mongo_dump_path, self.mongo_host, self.mongo_port, self.mongo_user, self.mongo_password,
-                       db_name, backup_path)
-            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True,
-                                    universal_newlines=True)
-            self.logger(f"[{command}] 标准错误输出: {result.stderr}")
-            if os.path.exists(backup_path):
-                fsize = self.get_dir_size(backup_path)
-                self.bksize = self.format_filesize(fsize)
-                self.bkstate = 1
+                if not (os.path.exists(self.backup_directory)):
+                    os.makedirs(self.backup_directory)
+                    self.logger("备份目录不存在，创建目录" + self.backup_directory)
+                backup_path = self.backup_directory + "/" + db_name + '_' + time.strftime("%Y%m%d%H%M%S")
+                self.logger(f"正在连接数据库{self.mongo_host}:{self.mongo_port}，开始执行备份{db_name}")
+                command = "%s -h %s:%s -u %s -p %s  --authenticationDatabase admin --gzip -d %s -o %s" % \
+                          (self.mongo_dump_path, self.mongo_host, self.mongo_port, self.mongo_user, self.mongo_password,
+                           db_name, backup_path)
+                result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True,
+                                        universal_newlines=True)
+                self.logger(f"[{command}] 标准错误输出: {result.stderr}")
+                if os.path.exists(backup_path):
+                    fsize = self.get_dir_size(backup_path)
+                    self.bksize = self.format_filesize(fsize)
+                    self.bkstate = 1
+                else:
+                    self.bksize = "0B"
+                    self.bkstate = 0
             else:
-                self.bksize = "0B"
+                self.logger(f"检测到实例{self.mongo_host}:{self.mongo_port}连接异常，终止备份，请检查配置信息是否正确。")
+                self.start_time = time.time()
+                self.bksize = '0B'
                 self.bkstate = 0
+
         except (UnsupportedMongoDBVersionError, Exception) as e:
             if isinstance(e, UnsupportedMongoDBVersionError):
                 self.logger(f"当前备份程序不支持{self.version}！")
@@ -183,68 +190,59 @@ class DatabaseBackup(object):
         self.db_host = None
         self.db_port = None
         try:
-            max_retries = 3
-            retry_count = 0
-            connected = False
-            while not connected and retry_count < max_retries:
-                try:
-                    if int(config.get('Proxy_Server', 'proxy_enabled')) == 1:
-                        self.logger(f"已开启数据上报代理模式！")
-                        self.server = SSHTunnelForwarder(
-                            ssh_address_or_host=(self.proxy_host, int(self.proxy_port)),
-                            ssh_username=self.proxy_username,
-                            ssh_password=self.proxy_password,
-                            remote_bind_address=(self.report_host, int(self.report_port)),
-                            local_bind_address=('127.0.0.1', 0),
-                        )
-                        self.server.start()
-                        self.server.check_tunnels()
-                        # print(self.server.tunnel_is_up, flush=True)
-                        if self.server.is_active:
-                            connected = True
-                            self.local_port = self.server.local_bind_port
-                            self.logger(
-                                '本地端口:{}已转发至远程端口{}:{}'.format(self.local_port, self.proxy_host, self.proxy_port))
-                        else:
-                            self.logger(
-                                '本地端口{}:{}转发失败，请重试'.format(self.server.local_bind_host, self.server.local_bind_port))
+            if int(config.get('Proxy_Server', 'proxy_enabled')) == 1:
+                self.logger(f"已开启数据上报代理模式！")
+                self.server = SSHTunnelForwarder(
+                    ssh_address_or_host=(self.proxy_host, int(self.proxy_port)),
+                    ssh_username=self.proxy_username,
+                    ssh_password=self.proxy_password,
+                    remote_bind_address=(self.report_host, int(self.report_port)),
+                    local_bind_address=('127.0.0.1', 0),
+                )
+                self.server.start()
+                self.server.check_tunnels()
+                # print(self.server.tunnel_is_up, flush=True)
+                if self.server.is_active:
+                    self.local_port = self.server.local_bind_port
+                    self.logger(
+                        '本地端口:{}已转发至远程端口{}:{}'.format(self.local_port, self.proxy_host, self.proxy_port))
+                else:
+                    self.logger(
+                        '本地端口{}:{}转发失败，请重试'.format(self.server.local_bind_host, self.server.local_bind_port))
 
-                        self.db_host = self.server.local_bind_host  # server.local_bind_host 是 参数 local_bind_address 的 ip
-                        self.db_port = self.server.local_bind_port  # server.local_bind_port 是 参数 local_bind_address 的 port
-                    else:
-                        self.logger(f"未开启数据上报代理模式！")
-                        self.db_host = self.report_host
-                        self.db_port = int(self.report_port)
+                self.db_host = self.server.local_bind_host  # server.local_bind_host 是 参数 local_bind_address 的 ip
+                self.db_port = self.server.local_bind_port  # server.local_bind_port 是 参数 local_bind_address 的 port
+            else:
+                self.logger(f"未开启数据上报代理模式！")
+                self.db_host = self.report_host
+                self.db_port = int(self.report_port)
 
-                    conn = pymysql.connect(
-                        host=self.db_host,
-                        port=self.db_port,
-                        user=self.report_user,
-                        passwd=self.report_password,
-                        db=config.get('Info_Reporting', 'db'),
-                    )
-                    insert_sql = "INSERT INTO dbs_backup_info(project, source, category, address, port, dbname, " \
-                                 "bksize, bktype, bkstate, start_time, end_time, elapsed_time, bklocate) " \
-                                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            conn = pymysql.connect(
+                host=self.db_host,
+                port=self.db_port,
+                user=self.report_user,
+                passwd=self.report_password,
+                db=config.get('Info_Reporting', 'db'),
+            )
+            insert_sql = "INSERT INTO dbs_backup_info(project, source, category, address, port, dbname, " \
+                         "bksize, bktype, bkstate, start_time, end_time, elapsed_time, bklocate) " \
+                         "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
-                    params = (self.mongo_project, 'IDC', 'MongoDb', self.mongo_host, self.mongo_port, dbname, self.bksize, '全量',
-                              self.bkstate, self.convert_timestamp_to_datetime(self.start_time),
-                              self.convert_timestamp_to_datetime(self.end_time), self.elapsed_time, self.get_local_ip())
-                    cur = conn.cursor()
-                    cur.execute(insert_sql, params)
-                    conn.commit()
-                    formatted_sql = cur.mogrify(insert_sql, params)
-                    self.logger(f"执行数据上报{self.report_host}，插入语句： {formatted_sql}")
-                    cur.close()
-                    conn.close()
-                    if connected:
-                        self.server.stop()  # 连接成功后释放端口
-                        self.logger(f"关闭代理通道。")
-                except Exception as e:
-                    self.logger(f"连接失败: {str(e)}")
-                    retry_count += 1
-                    self.logger(f"重试次数: {retry_count}")
-                    time.sleep(5)  # 等待一段时间后重试
+            params = (self.mongo_project, 'IDC', 'MongoDb', self.mongo_host, self.mongo_port, dbname, self.bksize, '全量',
+                      self.bkstate, self.convert_timestamp_to_datetime(self.start_time),
+                      self.convert_timestamp_to_datetime(self.end_time), self.elapsed_time, self.get_local_ip())
+            cur = conn.cursor()
+            cur.execute(insert_sql, params)
+            conn.commit()
+            formatted_sql = cur.mogrify(insert_sql, params)
+            self.logger(f"执行数据上报{self.report_host}，插入语句： {formatted_sql}")
+            cur.close()
+            conn.close()
+            if int(config.get('Proxy_Server', 'proxy_enabled')) == 1:
+                self.server.stop()
+                self.logger(f"关闭代理通道。")
+            return 'successful'
+
         except Exception as e:
             self.logger(f"备份信息上报时发生异常: {str(e)}")
             return 'failed'

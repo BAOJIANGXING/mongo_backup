@@ -17,7 +17,7 @@ def get_config_file():
 
 
 def print_version():
-    print("当前版本：1.2.0 兼容更多的mongodb版本；修复不能上报失败备份的逻辑问题；增加备份位置字段;修改动态端口代理透传和重试机制。")
+    print("当前版本：1.2.1 修复关闭代理模式时循环上报问题；去掉重试次数；")
 
 
 parser = argparse.ArgumentParser(description='备份程序')
